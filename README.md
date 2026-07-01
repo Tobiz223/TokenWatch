@@ -37,3 +37,13 @@ Edit them to match current model pricing.
 - `TokenWatchCore` — pure, UI-free, unit-tested logic:
   `LogParser`, `CostEngine`, `OverkillDetector`, `ComplexityHeuristics`, `Advisor`, `PricingTable`.
 - `TokenWatch` — thin AppKit/SwiftUI menu bar shell over an observable `UsageStore`.
+
+## Windows preview (test the logic without a Mac)
+The `preview/` folder is a dependency-free Python mirror of `TokenWatchCore`. It runs on
+Windows today and reads your real Claude Code logs, so you can validate behaviour before
+the Xcode build. See [preview/README.md](preview/README.md).
+
+```bash
+py preview/tokenwatch.py stats
+py preview/test_tokenwatch.py
+```

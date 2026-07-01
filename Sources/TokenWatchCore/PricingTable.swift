@@ -22,8 +22,26 @@ public struct PricingTable: Equatable {
         self.defaultRates = defaultRates
     }
 
-    public func rates(for model: String) -> Rates { rates[model] ?? defaultRates }
-    public func isKnown(_ model: String) -> Bool { rates[model] != nil }
+    /// Resolves rates for a model id. Tries an exact match first, then a model-family
+    /// match (opus/sonnet/haiku found as a substring), then the default. Family matching
+    /// keeps versioned ids like "claude-sonnet-4-6" priced correctly.
+    public func rates(for model: String) -> Rates {
+        if let exact = rates[model] { return exact }
+        if let family = Self.familyKey(for: model), let familyRates = rates[family] { return familyRates }
+        return defaultRates
+    }
+
+    public func isKnown(_ model: String) -> Bool {
+        if rates[model] != nil { return true }
+        if let family = Self.familyKey(for: model) { return rates[family] != nil }
+        return false
+    }
+
+    static func familyKey(for model: String) -> String? {
+        let m = model.lowercased()
+        for family in ["opus", "sonnet", "haiku"] where m.contains(family) { return family }
+        return nil
+    }
 
     public static func load(from data: Data) throws -> PricingTable {
         var all = try JSONDecoder().decode([String: Rates].self, from: data)

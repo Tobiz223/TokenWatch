@@ -40,6 +40,7 @@ public struct LogParser {
                   let usage = m["usage"] as? [String: Any],
                   let model = m["model"] as? String
             else { continue }
+            if model.hasPrefix("<") { continue }   // skip Claude Code synthetic messages
 
             let record = UsageRecord(
                 id: m["id"] as? String,
