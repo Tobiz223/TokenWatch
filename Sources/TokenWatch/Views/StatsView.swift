@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct ModelSpend: Identifiable {
+    let id: String       // model name
+    let cost: Double
+}
+
 struct StatsView: View {
     @EnvironmentObject var store: UsageStore
     var body: some View {
@@ -11,17 +16,31 @@ struct StatsView: View {
                 .foregroundColor(.orange)
             Divider()
             Text("By model").font(.subheadline).bold()
-            ForEach(byModel(), id: \.0) { name, cost in
-                HStack { Text(name); Spacer(); Text(String(format: "$%.4f", cost)) }
+            ForEach(byModel()) { spend in
+                HStack {
+                    Text(shortModel(spend.id))
+                    Spacer()
+                    Text(String(format: "$%.4f", spend.cost))
+                }
             }
             Spacer()
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-    private func byModel() -> [(String, Double)] {
+
+    private func byModel() -> [ModelSpend] {
         var totals: [String: Double] = [:]
         for item in store.history { totals[item.record.model, default: 0] += item.cost }
-        return totals.sorted { $0.value > $1.value }
+        return totals
+            .map { ModelSpend(id: $0.key, cost: $0.value) }
+            .sorted { $0.cost > $1.cost }
+    }
+
+    private func shortModel(_ m: String) -> String {
+        if m.contains("opus") { return "Opus" }
+        if m.contains("sonnet") { return "Sonnet" }
+        if m.contains("haiku") { return "Haiku" }
+        return m
     }
 }
