@@ -1,0 +1,4 @@
+{"type":"user","timestamp":"2026-07-01T10:00:00Z","message":{"content":"fix the login bug please"}}
+{"type":"assistant","timestamp":"2026-07-01T10:00:05Z","cwd":"/Users/x/dev/myapp","message":{"id":"msg_1","model":"claude-opus-4-8","usage":{"input_tokens":2300,"output_tokens":800,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"garbage line that is not json}
+{"type":"assistant","timestamp":"2026-07-01T10:01:00Z","cwd":"/Users/x/dev/myapp","message":{"id":"msg_2","model":"claude-haiku-4-5","usage":{"input_tokens":120,"output_tokens":40}}}
