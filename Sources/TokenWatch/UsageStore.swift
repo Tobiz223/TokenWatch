@@ -10,11 +10,31 @@ struct HistoryItem: Identifiable {
     let overpay: Double
 }
 
+struct ModelSpend: Identifiable {
+    let id: String        // full model id
+    let short: String     // "Opus" / "Sonnet" / "Haiku"
+    let cost: Double
+}
+
+func shortModel(_ m: String) -> String {
+    if m.contains("opus") { return "Opus" }
+    if m.contains("sonnet") { return "Sonnet" }
+    if m.contains("haiku") { return "Haiku" }
+    return m
+}
+
 @MainActor
 final class UsageStore: ObservableObject {
-    @Published var monthToDateText: String = "—"
-    @Published var history: [HistoryItem] = []
+    @Published var monthToDate: Double = 0
+    @Published var allTime: Double = 0
+    @Published var overkillCount: Int = 0
     @Published var totalOverpay: Double = 0
+    @Published var history: [HistoryItem] = []
+    @Published var byModel: [ModelSpend] = []
+    @Published var updatedAt: String = "—"
+
+    /// Formatted month-to-date figure shown in the menu bar (e.g. "$47.80").
+    var monthToDateText: String { String(format: "$%.2f", monthToDate) }
 
     let advisor: Advisor
     private let rootPath: String
@@ -42,20 +62,35 @@ final class UsageStore: ObservableObject {
     func refresh() {
         let records = loadAllRecords()
         let cal = Calendar.current
-        let mtd = costEngine.monthToDateTotal(records, now: Date(), calendar: cal)
-        monthToDateText = String(format: "$%.2f", mtd)
 
         var items: [HistoryItem] = []
+        var byModelTotals: [String: Double] = [:]
         var overpaySum = 0.0
+        var overkills = 0
+        var all = 0.0
+
         for r in records {
+            let cost = costEngine.cost(for: r)
+            all += cost
+            byModelTotals[r.model, default: 0] += cost
             let res = detector.evaluate(r)
-            overpaySum += res.overpay
+            if res.isOverkill { overkills += 1; overpaySum += res.overpay }
             items.append(HistoryItem(id: r.id ?? UUID().uuidString, record: r,
-                                     cost: costEngine.cost(for: r),
-                                     isOverkill: res.isOverkill, overpay: res.overpay))
+                                     cost: cost, isOverkill: res.isOverkill, overpay: res.overpay))
         }
-        history = items.sorted { $0.record.timestamp > $1.record.timestamp }
+
+        monthToDate = costEngine.monthToDateTotal(records, now: Date(), calendar: cal)
+        allTime = all
+        overkillCount = overkills
         totalOverpay = overpaySum
+        history = items.sorted { $0.record.timestamp > $1.record.timestamp }
+        byModel = byModelTotals
+            .map { ModelSpend(id: $0.key, short: shortModel($0.key), cost: $0.value) }
+            .sorted { $0.cost > $1.cost }
+
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        updatedAt = f.string(from: Date())
     }
 
     private func loadAllRecords() -> [UsageRecord] {

@@ -19,13 +19,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
 
-        store.$monthToDateText
+        store.$monthToDate
             .receive(on: RunLoop.main)
-            .sink { [weak self] text in self?.statusItem.button?.title = " " + text }
+            .sink { [weak self] value in
+                self?.statusItem.button?.title = " " + String(format: "$%.2f", value)
+            }
             .store(in: &cancellables)
 
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 380, height: 460)
+        popover.contentSize = NSSize(width: 420, height: 520)
         popover.contentViewController = NSHostingController(rootView: RootView().environmentObject(store))
 
         store.startWatching()

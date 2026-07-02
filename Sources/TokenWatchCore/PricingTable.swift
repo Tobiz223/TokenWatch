@@ -55,8 +55,14 @@ public struct PricingTable: Equatable {
            let table = try? load(from: data) {
             return table
         }
-        // Safe fallback if the resource is missing.
-        let def = Rates(input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3)
-        return PricingTable(rates: [:], defaultRates: def)
+        // Safe fallback if the resource is missing — keeps family pricing correct
+        // even when the bundled JSON can't be located (e.g. a hand-assembled .app).
+        return PricingTable(
+            rates: [
+                "opus":   Rates(input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5),
+                "sonnet": Rates(input: 3.0,  output: 15.0, cacheWrite: 3.75,  cacheRead: 0.3),
+                "haiku":  Rates(input: 1.0,  output: 5.0,  cacheWrite: 1.25,  cacheRead: 0.1),
+            ],
+            defaultRates: Rates(input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.3))
     }
 }
