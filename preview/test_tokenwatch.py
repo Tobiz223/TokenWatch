@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tokenwatch import (  # noqa: E402
     PricingTable, CostEngine, LogParser, ComplexityHeuristics,
     OverkillDetector, Advisor, parse_analysis, classification_prompt,
+    group_requests,
 )
 
 
@@ -197,6 +198,25 @@ class TaskAnalyzerParseTests(unittest.TestCase):
         p = classification_prompt("rename foo")
         self.assertIn("rename foo", p)
         self.assertIn("haiku|sonnet|opus", p)
+
+
+class GroupRequestsTests(unittest.TestCase):
+    def test_groups_assistant_calls_by_turn(self):
+        lines = [
+            '{"type":"user","message":{"content":"fix bug"}}',
+            '{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":100}}}',
+            '{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":50}}}',
+            '{"type":"user","message":{"content":"add test"}}',
+            '{"type":"assistant","message":{"model":"claude-haiku-4-5","usage":{"input_tokens":10,"output_tokens":10}}}',
+        ]
+        recs = LogParser().parse_lines(lines, "p", source="f")
+        eng = make_engine()
+        det = OverkillDetector(eng, ComplexityHeuristics())
+        groups = group_requests(recs, eng, det)
+        self.assertEqual(len(groups), 2)
+        g = next(x for x in groups if x["title"] == "fix bug")
+        self.assertEqual(len(g["calls"]), 2)
+        self.assertEqual(g["models"], ["Opus"])
 
 
 if __name__ == "__main__":

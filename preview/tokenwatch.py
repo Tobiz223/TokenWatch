@@ -96,6 +96,7 @@ class UsageRecord:
     cache_read_tokens: int
     prompt_preview: str
     project: str
+    turn_id: str = ""   # groups assistant calls under the user request that triggered them
 
 
 # ---------------------------------------------------------------------------
@@ -129,12 +130,13 @@ class CostEngine:
 # LogParser  (mirrors Sources/TokenWatchCore/LogParser.swift)
 # ---------------------------------------------------------------------------
 class LogParser:
-    def __init__(self, preview_limit: int = 80):
+    def __init__(self, preview_limit: int = 160):
         self.preview_limit = preview_limit
 
-    def parse_lines(self, lines, project: str):
+    def parse_lines(self, lines, project: str, source: str = ""):
         out = []
         last_preview = ""
+        turn = 0
         for line in lines:
             line = line.strip()
             if not line:
@@ -150,7 +152,11 @@ class LogParser:
             message = obj.get("message")
 
             if typ == "user" and isinstance(message, dict):
-                last_preview = self._extract_preview(message.get("content"))
+                preview = self._extract_preview(message.get("content"))
+                # A real user prompt starts a new turn; tool results (no text) do not.
+                if preview:
+                    turn += 1
+                    last_preview = preview
                 continue
 
             if typ != "assistant" or not isinstance(message, dict):
@@ -172,13 +178,14 @@ class LogParser:
                 cache_read_tokens=self._int(usage, "cache_read_input_tokens"),
                 prompt_preview=last_preview,
                 project=self._project(obj.get("cwd"), project),
+                turn_id=f"{source}#{turn}",
             ))
         return out
 
     def parse_file(self, path: str, project: str):
         try:
             with open(path, encoding="utf-8", errors="replace") as fh:
-                return self.parse_lines(fh, project)
+                return self.parse_lines(fh, project, source=path)
         except OSError:
             return []
 
@@ -411,6 +418,48 @@ def short_model(m: str) -> str:
     return m
 
 
+def group_requests(records, cost_engine, detector, limit: int = 200):
+    """Group assistant calls under the user request (turn) that triggered them."""
+    groups: dict[str, dict] = {}
+    order = []
+    for r in records:
+        key = r.turn_id or f"solo:{id(r)}"
+        g = groups.get(key)
+        if g is None:
+            g = {"title": r.prompt_preview, "timestamp": r.timestamp, "project": r.project,
+                 "cost": 0.0, "inTok": 0, "outTok": 0, "cacheRead": 0, "cacheWrite": 0,
+                 "overkill": False, "overpay": 0.0, "models": [], "calls": []}
+            groups[key] = g
+            order.append(key)
+        cost = cost_engine.cost(r)
+        is_over, overpay = detector.evaluate(r)
+        g["cost"] += cost
+        g["inTok"] += r.input_tokens
+        g["outTok"] += r.output_tokens
+        g["cacheRead"] += r.cache_read_tokens
+        g["cacheWrite"] += r.cache_write_tokens
+        if is_over:
+            g["overkill"] = True
+            g["overpay"] += overpay
+        if not g["title"] and r.prompt_preview:
+            g["title"] = r.prompt_preview
+        sm = short_model(r.model)
+        if sm not in g["models"]:
+            g["models"].append(sm)
+        if r.timestamp < g["timestamp"]:
+            g["timestamp"] = r.timestamp
+        g["calls"].append({
+            "short": sm, "model": r.model, "cost": cost,
+            "inTok": r.input_tokens, "outTok": r.output_tokens,
+            "cacheRead": r.cache_read_tokens, "cacheWrite": r.cache_write_tokens,
+            "overkill": is_over, "overpay": overpay,
+            "when": r.timestamp.astimezone().strftime("%H:%M:%S"),
+        })
+    result = [groups[k] for k in order]
+    result.sort(key=lambda g: g["timestamp"], reverse=True)
+    return result[:limit]
+
+
 class TokenWatch:
     def __init__(self, root: str | None = None):
         self.root = root or default_root()
@@ -438,18 +487,17 @@ def cmd_status(tw: TokenWatch, _args):
 
 
 def cmd_history(tw: TokenWatch, args):
-    recs = tw.records()[: args.limit]
-    if not recs:
+    groups = group_requests(tw.records(), tw.cost_engine, tw.detector, limit=args.limit)
+    if not groups:
         print("No requests found in", tw.root)
         return
-    for r in recs:
-        is_over, overpay = tw.detector.evaluate(r)
-        cost = tw.cost_engine.cost(r)
-        flag = f"  ⚠️ overkill -${overpay:.4f}" if is_over else ""
-        when = r.timestamp.astimezone().strftime("%m-%d %H:%M")
-        preview = (r.prompt_preview[:48] + "…") if len(r.prompt_preview) > 48 else r.prompt_preview
-        print(f"{when}  {short_model(r.model):6}  ${cost:8.4f}  "
-              f"{r.input_tokens:>7}->{r.output_tokens:<6} tok  {preview}{flag}")
+    for g in groups:
+        title = g["title"] or "(no prompt text)"
+        title = (title[:58] + "…") if len(title) > 58 else title
+        when = g["timestamp"].astimezone().strftime("%m-%d %H:%M")
+        models = "+".join(g["models"])
+        flag = f"  ⚠️ -${g['overpay']:.4f}" if g["overkill"] else ""
+        print(f"{when}  {models:16}  ${g['cost']:8.4f}  {len(g['calls']):>2}× calls  {title}{flag}")
 
 
 def cmd_stats(tw: TokenWatch, _args):

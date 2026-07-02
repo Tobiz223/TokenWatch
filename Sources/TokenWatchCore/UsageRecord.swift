@@ -10,11 +10,13 @@ public struct UsageRecord: Equatable {
     public let cacheReadTokens: Int
     public let promptPreview: String
     public let project: String
+    /// Groups assistant calls under the user request (turn) that triggered them.
+    public let turnId: String
 
     public init(id: String?, timestamp: Date, model: String,
                 inputTokens: Int, outputTokens: Int,
                 cacheWriteTokens: Int, cacheReadTokens: Int,
-                promptPreview: String, project: String) {
+                promptPreview: String, project: String, turnId: String = "") {
         self.id = id
         self.timestamp = timestamp
         self.model = model
@@ -24,5 +26,6 @@ public struct UsageRecord: Equatable {
         self.cacheReadTokens = cacheReadTokens
         self.promptPreview = promptPreview
         self.project = project
+        self.turnId = turnId
     }
 }

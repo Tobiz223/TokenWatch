@@ -30,6 +30,8 @@ final class UsageStore: ObservableObject {
     @Published var overkillCount: Int = 0
     @Published var totalOverpay: Double = 0
     @Published var history: [HistoryItem] = []
+    @Published var requests: [RequestGroup] = []
+    @Published var requestCount: Int = 0
     @Published var byModel: [ModelSpend] = []
     @Published var updatedAt: String = "—"
 
@@ -41,6 +43,7 @@ final class UsageStore: ObservableObject {
     private let parser = LogParser()
     private let costEngine: CostEngine
     private let detector: OverkillDetector
+    private let grouper: RequestGrouper
     private var watcher: FileWatcher?
 
     init(rootPath: String = NSString(string: "~/.claude/projects").expandingTildeInPath) {
@@ -48,6 +51,7 @@ final class UsageStore: ObservableObject {
         let pricing = PricingTable.bundled()
         self.costEngine = CostEngine(pricing: pricing)
         self.detector = OverkillDetector(costEngine: costEngine)
+        self.grouper = RequestGrouper(costEngine: costEngine, detector: detector)
         self.advisor = Advisor(costEngine: costEngine)
         refresh()
     }
@@ -84,6 +88,8 @@ final class UsageStore: ObservableObject {
         overkillCount = overkills
         totalOverpay = overpaySum
         history = items.sorted { $0.record.timestamp > $1.record.timestamp }
+        requests = grouper.groups(from: records, limit: 200)
+        requestCount = records.count
         byModel = byModelTotals
             .map { ModelSpend(id: $0.key, short: shortModel($0.key), cost: $0.value) }
             .sorted { $0.cost > $1.cost }
@@ -100,7 +106,7 @@ final class UsageStore: ObservableObject {
         for case let rel as String in enumerator where rel.hasSuffix(".jsonl") {
             let full = (rootPath as NSString).appendingPathComponent(rel)
             if let contents = try? String(contentsOfFile: full, encoding: .utf8) {
-                records += parser.parse(fileContents: contents, project: "unknown")
+                records += parser.parse(fileContents: contents, project: "unknown", source: rel)
             }
         }
         return records

@@ -5,7 +5,7 @@ public struct LogParser {
     private let formatter: ISO8601DateFormatter
     private let fallbackFormatter: ISO8601DateFormatter
 
-    public init(previewLimit: Int = 80) {
+    public init(previewLimit: Int = 160) {
         self.previewLimit = previewLimit
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -15,14 +15,15 @@ public struct LogParser {
         self.fallbackFormatter = f2
     }
 
-    public func parse(fileContents: String, project: String) -> [UsageRecord] {
+    public func parse(fileContents: String, project: String, source: String = "") -> [UsageRecord] {
         parse(lines: fileContents.split(separator: "\n", omittingEmptySubsequences: true).map(String.init),
-              project: project)
+              project: project, source: source)
     }
 
-    public func parse(lines: [String], project: String) -> [UsageRecord] {
+    public func parse(lines: [String], project: String, source: String = "") -> [UsageRecord] {
         var out: [UsageRecord] = []
         var lastPreview = ""
+        var turn = 0
         for line in lines {
             guard let data = line.data(using: .utf8),
                   let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -32,7 +33,12 @@ public struct LogParser {
             let message = obj["message"] as? [String: Any]
 
             if type == "user", let m = message {
-                lastPreview = extractPreview(from: m["content"])
+                let preview = extractPreview(from: m["content"])
+                // A real user prompt starts a new turn; tool results (no text) do not.
+                if !preview.isEmpty {
+                    turn += 1
+                    lastPreview = preview
+                }
                 continue
             }
 
@@ -51,7 +57,8 @@ public struct LogParser {
                 cacheWriteTokens: intField(usage, "cache_creation_input_tokens"),
                 cacheReadTokens: intField(usage, "cache_read_input_tokens"),
                 promptPreview: lastPreview,
-                project: projectName(fromCwd: obj["cwd"] as? String, fallback: project)
+                project: projectName(fromCwd: obj["cwd"] as? String, fallback: project),
+                turnId: "\(source)#\(turn)"
             )
             out.append(record)
         }

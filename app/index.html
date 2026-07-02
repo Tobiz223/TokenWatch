@@ -102,7 +102,7 @@
   .bar .amt{font-family:var(--mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
 
   /* history table (collapsible rows) */
-  .cols{grid-template-columns:15px 70px 1fr 78px 72px}
+  .cols{grid-template-columns:15px 62px 1fr 72px}
   .thead{display:grid;gap:10px;align-items:center;font-size:10px;letter-spacing:.6px;
     text-transform:uppercase;color:var(--faint);padding:0 2px 8px;border-bottom:1px solid var(--line)}
   .thead .r{text-align:right}
@@ -117,10 +117,20 @@
   .tsum .caret{color:var(--faint);font-size:9px;transition:transform .15s}
   .trow.open .tsum .caret{transform:rotate(90deg)}
   .tsum .when{font-family:var(--mono);color:var(--faint);font-size:11px}
-  .tsum .mdl{display:flex;align-items:center;gap:7px;min-width:0}
-  .tsum .mdl .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .tsum .tok,.tsum .cost{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;font-size:11.5px}
-  .tsum .cost{color:var(--text)} .trow.over .tsum .cost{color:var(--red)}
+  .tsum .req{display:flex;align-items:center;gap:7px;min-width:0}
+  .tsum .req .dots{display:flex;gap:3px;flex:none}
+  .tsum .req .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tsum .req .badge{flex:none;font-family:var(--mono);font-size:9.5px;color:var(--faint);
+    border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+  .tsum .cost{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;font-size:11.5px;color:var(--text)}
+  .trow.over .tsum .cost{color:var(--red)}
+  .calls{margin-top:10px;border-top:1px solid var(--line-soft)}
+  .call{display:grid;grid-template-columns:64px 1fr auto;gap:10px;align-items:center;
+    padding:6px 0;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px}
+  .call .ct{color:var(--faint)}
+  .call .cm{display:flex;align-items:center;gap:6px;color:var(--muted)}
+  .call .cc{font-variant-numeric:tabular-nums}
+  .call.over .cc{color:var(--red)}
   .tdetail{display:none;padding:4px 10px 13px 21px}
   .trow.open .tdetail{display:block}
   .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:11.5px;margin-top:6px}
@@ -219,8 +229,7 @@
       <div class="thead cols">
         <span></span>
         <span data-i="col_time">Time</span>
-        <span data-i="col_model">Model</span>
-        <span class="r" data-i="col_tokens">Tokens</span>
+        <span data-i="col_request">Request</span>
         <span class="r" data-i="col_cost">Cost</span>
       </div>
       <div class="tbody" id="tbody"></div>
@@ -263,8 +272,9 @@ const I18N = {
     tab_overview:"Overview", tab_history:"History", tab_advisor:"Advisor",
     month_to_date:"Month to date", meter_run:"accruing this month",
     all_time:"All-time spend", requests:"Requests", by_model:"Spend by model",
-    col_time:"Time", col_model:"Model", col_tokens:"Tokens", col_cost:"Cost",
+    col_time:"Time", col_model:"Model", col_tokens:"Tokens", col_cost:"Cost", col_request:"Request",
     of_all_time:"of all-time", empty:"No requests found yet.",
+    calls_label:"calls", models_label:"Models", no_prompt:"(no prompt text)",
     overkill:(amt,n)=>`You overpaid <b>${amt}</b> on ${n} simple task${n==1?"":"s"} — Haiku would have covered them.`,
     overkill_flag:(amt)=>`overkill — Haiku saves ${amt}`,
     advisor_title:"Model advisor",
@@ -280,8 +290,9 @@ const I18N = {
     tab_overview:"Огляд", tab_history:"Історія", tab_advisor:"Порадник",
     month_to_date:"За поточний місяць", meter_run:"накопичується цього місяця",
     all_time:"Витрати за весь час", requests:"Запити", by_model:"Витрати за моделями",
-    col_time:"Час", col_model:"Модель", col_tokens:"Токени", col_cost:"Вартість",
+    col_time:"Час", col_model:"Модель", col_tokens:"Токени", col_cost:"Вартість", col_request:"Запит",
     of_all_time:"від усього часу", empty:"Запитів поки не знайдено.",
+    calls_label:"викликів", models_label:"Моделі", no_prompt:"(без тексту запиту)",
     overkill:(amt,n)=>`Ви переплатили <b>${amt}</b> на ${n} прост${n==1?"ій задачі":"их задачах"} — вистачило б Haiku.`,
     overkill_flag:(amt)=>`перевитрата — Haiku зекономив би ${amt}`,
     advisor_title:"Порадник моделі",
@@ -349,26 +360,37 @@ function render(d){
     </div>`;}).join("");
   requestAnimationFrame(()=>document.querySelectorAll(".tk i").forEach(i=>i.style.width=i.dataset.w+"%"));
 
-  $("#tbody").innerHTML = d.history.length ? d.history.map(h=>{
-    const c = clsFor(h.short);
-    const kv = (k,v)=>`<span class="k">${k}</span><span class="v">${v}</span>`;
-    return `<div class="trow ${h.overkill?"over":""}">
+  const kv = (k,v)=>`<span class="k">${k}</span><span class="v">${v}</span>`;
+  $("#tbody").innerHTML = d.history.length ? d.history.map(g=>{
+    const title = g.title ? esc(g.title) : t("no_prompt");
+    const dots = g.models.map(m=>`<span class="dot ${clsFor(m)}"></span>`).join("");
+    const calls = g.calls.map(c=>`
+      <div class="call ${c.overkill?"over":""}">
+        <span class="ct">${c.when}</span>
+        <span class="cm"><span class="dot ${clsFor(c.short)}"></span>${c.short} · ${num(c.inTok)}→${num(c.outTok)}</span>
+        <span class="cc">${money(c.cost, true)}</span>
+      </div>`).join("");
+    return `<div class="trow ${g.overkill?"over":""}">
       <button class="tsum cols">
         <span class="caret">▶</span>
-        <span class="when">${h.when}</span>
-        <span class="mdl"><span class="dot ${c}"></span><span class="t">${h.short}</span></span>
-        <span class="tok r">${num(h.inTok)}→${num(h.outTok)}</span>
-        <span class="cost r">${money(h.cost, true)}</span>
+        <span class="when">${g.when}</span>
+        <span class="req">
+          <span class="dots">${dots}</span>
+          <span class="title">${title}</span>
+          <span class="badge">${g.callCount}× ${t("calls_label")}</span>
+        </span>
+        <span class="cost">${money(g.cost, true)}</span>
       </button>
       <div class="tdetail">
         <div class="kv">
-          ${kv(t("col_model"), esc(h.model))}
-          ${kv(t("col_tokens"), `in ${num(h.inTok)} · out ${num(h.outTok)} · cache r ${num(h.cacheRead)} · cache w ${num(h.cacheWrite)}`)}
-          ${kv(t("col_cost"), money(h.cost, true))}
-          ${kv("Project", esc(h.project||"—"))}
+          ${kv(t("models_label"), g.models.join(" · "))}
+          ${kv(t("col_tokens"), `in ${num(g.inTok)} · out ${num(g.outTok)} · cache r ${num(g.cacheRead)} · cache w ${num(g.cacheWrite)}`)}
+          ${kv(t("col_cost"), money(g.cost, true))}
+          ${kv("Project", esc(g.project||"—"))}
         </div>
-        ${h.preview?`<div class="task">${esc(h.preview)}</div>`:""}
-        ${h.overkill?`<div class="flag">${t("overkill_flag")(money(h.overpay,true))}</div>`:""}
+        ${g.title?`<div class="task">${esc(g.title)}</div>`:""}
+        ${g.overkill?`<div class="flag">${t("overkill_flag")(money(g.overpay,true))}</div>`:""}
+        <div class="calls">${calls}</div>
       </div>
     </div>`;}).join("") : `<div class="empty">${t("empty")}</div>`;
 }

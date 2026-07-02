@@ -25,10 +25,26 @@ from urllib.parse import urlparse, parse_qs
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "preview"))
 
-from tokenwatch import TokenWatch, short_model  # noqa: E402
+from tokenwatch import TokenWatch, short_model, group_requests  # noqa: E402
 
 PORT = 8730
 tw = TokenWatch()
+
+
+def serialize_group(g: dict) -> dict:
+    return {
+        "title": g["title"],
+        "when": g["timestamp"].astimezone().strftime("%b %d  %H:%M"),
+        "models": g["models"],
+        "primary": g["models"][0] if g["models"] else "",
+        "cost": g["cost"],
+        "inTok": g["inTok"], "outTok": g["outTok"],
+        "cacheRead": g["cacheRead"], "cacheWrite": g["cacheWrite"],
+        "project": g["project"],
+        "overkill": g["overkill"], "overpay": g["overpay"],
+        "callCount": len(g["calls"]),
+        "calls": g["calls"],
+    }
 
 
 def build_data() -> dict:
@@ -40,29 +56,15 @@ def build_data() -> dict:
     by_model: dict[str, float] = {}
     overpay_sum = 0.0
     overkill_count = 0
-    history = []
     for r in recs:
-        cost = tw.cost_engine.cost(r)
-        by_model[r.model] = by_model.get(r.model, 0.0) + cost
+        by_model[r.model] = by_model.get(r.model, 0.0) + tw.cost_engine.cost(r)
         is_over, overpay = tw.detector.evaluate(r)
         if is_over:
             overkill_count += 1
             overpay_sum += overpay
-        if len(history) < 120:
-            history.append({
-                "when": r.timestamp.astimezone().strftime("%b %d  %H:%M"),
-                "model": r.model,
-                "short": short_model(r.model),
-                "cost": cost,
-                "inTok": r.input_tokens,
-                "outTok": r.output_tokens,
-                "cacheRead": r.cache_read_tokens,
-                "cacheWrite": r.cache_write_tokens,
-                "project": r.project,
-                "preview": r.prompt_preview,
-                "overkill": is_over,
-                "overpay": overpay,
-            })
+
+    history = [serialize_group(g)
+               for g in group_requests(recs, tw.cost_engine, tw.detector, limit=200)]
 
     models = sorted(
         ({"model": m, "short": short_model(m), "cost": c} for m, c in by_model.items()),
