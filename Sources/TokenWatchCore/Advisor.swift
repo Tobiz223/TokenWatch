@@ -33,12 +33,23 @@ public struct Advisor {
     }
 
     public func recommend(prompt: String) -> Recommendation {
-        let tier = heuristics.recommend(prompt: prompt)
+        recommendation(tier: heuristics.recommend(prompt: prompt), prompt: prompt)
+    }
+
+    /// Builds a recommendation for an explicit tier (e.g. one chosen by the LLM analyzer),
+    /// mapping it to a model id/alias and estimating the cost for this prompt.
+    public func recommendation(tier: ModelTier, prompt: String) -> Recommendation {
         let (modelId, alias) = ids(for: tier)
         let cost = costEngine.cost(inputTokens: prompt.count / 4,
                                    outputTokens: assumedOutputTokens,
                                    cacheWriteTokens: 0, cacheReadTokens: 0, model: modelId)
         return Recommendation(tier: tier, modelId: modelId, cliAlias: alias, estimatedCost: cost)
+    }
+
+    /// Estimated cost of running this prompt on Opus — used to show savings.
+    public func opusCost(prompt: String) -> Double {
+        costEngine.cost(inputTokens: prompt.count / 4, outputTokens: assumedOutputTokens,
+                        cacheWriteTokens: 0, cacheReadTokens: 0, model: "claude-opus-4-8")
     }
 
     public func runCommand(prompt: String, alias: String) -> [String] {

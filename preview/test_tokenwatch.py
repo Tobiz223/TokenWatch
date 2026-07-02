@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from tokenwatch import (  # noqa: E402
     PricingTable, CostEngine, LogParser, ComplexityHeuristics,
-    OverkillDetector, Advisor,
+    OverkillDetector, Advisor, parse_analysis, classification_prompt,
 )
 
 
@@ -170,6 +170,33 @@ class AdvisorTests(unittest.TestCase):
     def test_run_command_shape(self):
         self.assertEqual(self.adv.run_command("do a thing", "haiku"),
                          ["claude", "-p", "do a thing", "--model", "haiku"])
+
+
+class TaskAnalyzerParseTests(unittest.TestCase):
+    def test_parses_fenced_json(self):
+        raw = '```json\n{"model":"opus","situation":"arch design","reasoning":"hard","confidence":0.9}\n```'
+        a = parse_analysis(raw)
+        self.assertEqual(a["tier"], "opus")
+        self.assertEqual(a["situation"], "arch design")
+        self.assertAlmostEqual(a["confidence"], 0.9)
+
+    def test_parses_plain_json_with_prose(self):
+        raw = 'Sure! {"model":"haiku","situation":"rename","reasoning":"trivial","confidence":0.97}'
+        self.assertEqual(parse_analysis(raw)["tier"], "haiku")
+
+    def test_rejects_unknown_model(self):
+        self.assertIsNone(parse_analysis('{"model":"gpt-4","situation":"x","confidence":1}'))
+
+    def test_rejects_non_json(self):
+        self.assertIsNone(parse_analysis("no json here"))
+
+    def test_clamps_confidence(self):
+        self.assertEqual(parse_analysis('{"model":"sonnet","confidence":5}')["confidence"], 1.0)
+
+    def test_classification_prompt_contains_task(self):
+        p = classification_prompt("rename foo")
+        self.assertIn("rename foo", p)
+        self.assertIn("haiku|sonnet|opus", p)
 
 
 if __name__ == "__main__":

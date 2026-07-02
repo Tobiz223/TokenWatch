@@ -163,7 +163,16 @@
 
   .verdict{margin-top:16px;display:none;animation:fade .28s ease both}
   .verdict[data-show="true"]{display:block}
-  .chiprow{display:flex;align-items:center;gap:10px}
+  .situation{font-family:var(--disp);font-size:15px;font-weight:600;margin-bottom:2px}
+  .why{font-size:12.5px;line-height:1.5;color:#c3cee0;margin:8px 0 12px}
+  .meta{display:flex;gap:14px;font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:12px;flex-wrap:wrap}
+  .meta b{color:var(--mint);font-weight:700}
+  .via{display:inline-flex;align-items:center;gap:5px}
+  .spin{width:12px;height:12px;border:2px solid var(--hair);border-top-color:var(--amber);border-radius:50%;display:inline-block;animation:rot .7s linear infinite}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  .loading{display:none;align-items:center;gap:9px;margin-top:16px;font-size:12.5px;color:var(--muted)}
+  .loading[data-show="true"]{display:flex}
+  .chiprow{display:flex;align-items:center;gap:10px;margin-bottom:6px}
   .chip{font-family:var(--disp);font-weight:700;font-size:13px;padding:6px 12px;border-radius:99px}
   .chip.haiku{background:rgba(78,214,169,.16);color:var(--mint);border:1px solid rgba(78,214,169,.4)}
   .chip.sonnet{background:rgba(245,166,35,.16);color:var(--amber);border:1px solid rgba(245,166,35,.4)}
@@ -244,13 +253,21 @@
       <!-- ADVISOR -->
       <section class="panel" data-panel="advisor">
         <div class="eyebrow">Model advisor</div>
-        <p class="lead">Paste a task. TokenWatch picks the cheapest model that can still handle it — and hands you the command to run it.</p>
-        <textarea id="prompt" placeholder="e.g. rename a variable across the file&#10;or: debug the websocket reconnect race condition"></textarea>
-        <button class="btn" id="recommend">Recommend a model</button>
+        <p class="lead">Describe your task. TokenWatch asks Claude Haiku to read it and pick the cheapest model that can actually handle the situation — then hands you the command.</p>
+        <textarea id="prompt" placeholder="e.g. our users report the checkout total is occasionally wrong; find out why&#10;or: rename a variable across the file"></textarea>
+        <button class="btn" id="recommend">Analyze &amp; recommend</button>
+        <div class="loading" id="loading"><span class="spin"></span> Claude Haiku is analyzing the task…</div>
         <div class="verdict" id="verdict">
           <div class="chiprow">
             <span class="chip" id="chip"></span>
             <span class="est" id="est"></span>
+          </div>
+          <div class="situation" id="situation"></div>
+          <div class="why" id="why"></div>
+          <div class="meta">
+            <span class="via" id="via"></span>
+            <span>confidence <b id="conf"></b></span>
+            <span>saves <b id="save"></b> vs Opus</span>
           </div>
           <div class="cmd" id="cmd"><button class="copy" id="copy">copy</button><span id="cmdText"></span></div>
         </div>
@@ -330,13 +347,26 @@ function escapeHtml(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">
 $("#recommend").addEventListener("click", async ()=>{
   const prompt = $("#prompt").value.trim();
   if(!prompt) { $("#prompt").focus(); return; }
-  const r = await fetch("/api/advise?prompt="+encodeURIComponent(prompt)).then(r=>r.json());
-  const chip=$("#chip");
-  chip.className = "chip "+r.tier;
-  chip.textContent = ({haiku:"🟢 Haiku",sonnet:"🟡 Sonnet",opus:"🔴 Opus"})[r.tier];
-  $("#est").textContent = "≈ "+usd(r.estimated_cost)+" for this task";
-  $("#cmdText").textContent = r.command;
-  $("#verdict").dataset.show="true";
+  $("#verdict").dataset.show="false";
+  $("#loading").dataset.show="true";
+  $("#recommend").disabled = true;
+  try{
+    const r = await fetch("/api/advise?prompt="+encodeURIComponent(prompt)).then(r=>r.json());
+    const chip=$("#chip");
+    chip.className = "chip "+r.tier;
+    chip.textContent = ({haiku:"🟢 Haiku",sonnet:"🟡 Sonnet",opus:"🔴 Opus"})[r.tier];
+    $("#est").textContent = "≈ "+usd(r.estimated_cost)+" for this task";
+    $("#situation").textContent = r.situation || "";
+    $("#why").textContent = r.reasoning || "";
+    $("#via").innerHTML = r.source==="haiku"
+      ? '🧠 analyzed by Claude Haiku'
+      : '⚙ offline heuristic';
+    $("#conf").textContent = Math.round((r.confidence||0)*100)+"%";
+    $("#save").textContent = usd(r.savings_vs_opus||0);
+    $("#cmdText").textContent = r.command;
+    $("#verdict").dataset.show="true";
+  }catch(e){ $("#why").textContent="Analysis failed: "+e; }
+  finally{ $("#loading").dataset.show="false"; $("#recommend").disabled=false; }
 });
 $("#copy").addEventListener("click",()=>{
   navigator.clipboard.writeText($("#cmdText").textContent);

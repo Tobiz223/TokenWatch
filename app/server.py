@@ -100,10 +100,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif route.path == "/api/data":
             self._json(build_data())
         elif route.path == "/api/advise":
-            prompt = (parse_qs(route.query).get("prompt", [""])[0]).strip()
-            rec = tw.advisor.recommend(prompt)
-            rec["command"] = " ".join(tw.advisor.run_command(prompt, rec["alias"]))
-            self._json(rec)
+            q = parse_qs(route.query)
+            prompt = (q.get("prompt", [""])[0]).strip()
+            if not prompt:
+                self._json({"error": "empty prompt"})
+                return
+            if q.get("fast", ["0"])[0] == "1":
+                r = tw.advisor.recommend(prompt)
+                self._json({
+                    "tier": r["tier"], "model_id": r["model_id"], "alias": r["alias"],
+                    "estimated_cost": r["estimated_cost"], "situation": "offline estimate",
+                    "reasoning": "Offline heuristic (no Claude call).", "confidence": 0.5,
+                    "savings_vs_opus": 0.0, "source": "offline",
+                    "command": " ".join(tw.advisor.run_command(prompt, r["alias"])),
+                })
+            else:
+                self._json(tw.analyzer.analyze(prompt))
         else:
             self._send(404, b"not found", "text/plain; charset=utf-8")
 

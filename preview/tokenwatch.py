@@ -20,6 +20,8 @@ import argparse
 import glob
 import json
 import os
+import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -288,6 +290,104 @@ class Advisor:
 
 
 # ---------------------------------------------------------------------------
+# TaskAnalyzer  (mirrors Sources/TokenWatchCore/TaskAnalyzer.swift)
+# Real context analysis: asks Claude Haiku to classify the task, then picks the
+# cheapest capable model. Falls back to the offline heuristic if Claude is
+# unavailable. Prompt building + response parsing are pure and unit-tested.
+# ---------------------------------------------------------------------------
+CLASSIFY_INSTRUCTIONS = (
+    'You are a model-selection classifier for Claude coding tasks. Analyze the TASK '
+    'and choose the CHEAPEST Claude model that can still do it well: '
+    '"haiku" (trivial edits, renames, typos, simple lookups, tiny snippets), '
+    '"sonnet" (standard coding, moderate reasoning, multi-file edits), '
+    '"opus" (hard debugging, architecture/design, deep multi-step reasoning, subtle '
+    'concurrency/security). Respond with ONLY a compact JSON object and nothing else: '
+    '{"model":"haiku|sonnet|opus","situation":"2-4 word task type",'
+    '"reasoning":"one short sentence","confidence":0.0-1.0}. TASK: '
+)
+
+
+def classification_prompt(task: str) -> str:
+    return CLASSIFY_INSTRUCTIONS + task
+
+
+def parse_analysis(text: str):
+    """Extract the classifier JSON from raw model output (handles ```json fences)."""
+    if not text:
+        return None
+    match = re.search(r"\{.*\}", text, re.S)
+    if not match:
+        return None
+    try:
+        obj = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    tier = str(obj.get("model", "")).lower().strip()
+    if tier not in ("haiku", "sonnet", "opus"):
+        return None
+    try:
+        conf = float(obj.get("confidence", 0) or 0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    return {
+        "tier": tier,
+        "situation": str(obj.get("situation", "")).strip(),
+        "reasoning": str(obj.get("reasoning", "")).strip(),
+        "confidence": max(0.0, min(1.0, conf)),
+    }
+
+
+class TaskAnalyzer:
+    def __init__(self, cost_engine: CostEngine, heuristics: ComplexityHeuristics, timeout=60):
+        self.cost_engine = cost_engine
+        self.heuristics = heuristics
+        self.timeout = timeout
+
+    def analyze(self, task: str) -> dict:
+        text, err = self._run_claude(task)
+        analysis = parse_analysis(text) if text else None
+        source = "haiku"
+        if analysis is None:
+            tier = self.heuristics.recommend(task)
+            analysis = {
+                "tier": tier,
+                "situation": "offline estimate",
+                "reasoning": err or "Claude analysis unavailable; used the offline heuristic.",
+                "confidence": 0.5,
+            }
+            source = "offline"
+
+        tier = analysis["tier"]
+        model_id, alias = TIER_IDS[tier]
+        in_tok = max(1, len(task) // 4)
+        est = self.cost_engine.cost_tokens(in_tok, 500, 0, 0, model_id)
+        opus_est = self.cost_engine.cost_tokens(in_tok, 500, 0, 0, "claude-opus-4-8")
+        analysis.update({
+            "model_id": model_id,
+            "alias": alias,
+            "estimated_cost": est,
+            "savings_vs_opus": max(0.0, opus_est - est),
+            "command": " ".join(["claude", "-p", task, "--model", alias]),
+            "source": source,
+        })
+        return analysis
+
+    def _run_claude(self, task: str):
+        try:
+            proc = subprocess.run(
+                ["claude", "-p", classification_prompt(task), "--model", "haiku"],
+                capture_output=True, text=True, timeout=self.timeout, encoding="utf-8",
+            )
+        except FileNotFoundError:
+            return None, "Claude Code not found on PATH."
+        except subprocess.TimeoutExpired:
+            return None, "Analysis timed out."
+        if proc.returncode != 0:
+            return None, "Claude returned an error."
+        return proc.stdout, None
+
+
+# ---------------------------------------------------------------------------
 # Store / loading  (mirrors Sources/TokenWatch/UsageStore.swift)
 # ---------------------------------------------------------------------------
 def default_root() -> str:
@@ -319,6 +419,7 @@ class TokenWatch:
         self.heuristics = ComplexityHeuristics()
         self.detector = OverkillDetector(self.cost_engine, self.heuristics)
         self.advisor = Advisor(self.cost_engine, self.heuristics)
+        self.analyzer = TaskAnalyzer(self.cost_engine, self.heuristics)
         self.parser = LogParser()
 
     def records(self):
@@ -377,11 +478,24 @@ def cmd_stats(tw: TokenWatch, _args):
 
 def cmd_advise(tw: TokenWatch, args):
     prompt = args.prompt
-    rec = tw.advisor.recommend(prompt)
-    emoji = {"haiku": "🟢", "sonnet": "🟡", "opus": "🔴"}[rec["tier"]]
-    print(f"{emoji} Recommended: {rec['tier'].upper()}  ({rec['model_id']})")
-    print(f"   Estimated cost: ~${rec['estimated_cost']:.4f}")
-    print(f"   Run: {' '.join(tw.advisor.run_command(prompt, rec['alias']))}")
+    print("Analyzing task with Claude Haiku…" if not args.fast else "Using offline heuristic…")
+    if args.fast:
+        r = tw.advisor.recommend(prompt)
+        a = {"tier": r["tier"], "model_id": r["model_id"], "alias": r["alias"],
+             "estimated_cost": r["estimated_cost"], "situation": "offline estimate",
+             "reasoning": "Offline heuristic (no Claude call).", "confidence": 0.5,
+             "savings_vs_opus": 0.0, "source": "offline",
+             "command": " ".join(tw.advisor.run_command(prompt, r["alias"]))}
+    else:
+        a = tw.analyzer.analyze(prompt)
+    emoji = {"haiku": "🟢", "sonnet": "🟡", "opus": "🔴"}[a["tier"]]
+    src = "Claude Haiku" if a["source"] == "haiku" else "offline heuristic"
+    print(f"\n{emoji} Recommended: {a['tier'].upper()}  ({a['model_id']})   ·  via {src}")
+    print(f"   Situation:  {a['situation']}")
+    print(f"   Why:        {a['reasoning']}")
+    print(f"   Confidence: {int(a['confidence'] * 100)}%")
+    print(f"   Est. cost:  ~${a['estimated_cost']:.4f}   (saves ~${a['savings_vs_opus']:.4f} vs Opus)")
+    print(f"   Run: {a['command']}")
 
 
 def main(argv=None):
@@ -401,6 +515,7 @@ def main(argv=None):
     sub.add_parser("stats")
     a = sub.add_parser("advise")
     a.add_argument("prompt")
+    a.add_argument("--fast", action="store_true", help="skip the Claude call, use offline heuristic")
 
     args = p.parse_args(argv)
     tw = TokenWatch(root=args.root)

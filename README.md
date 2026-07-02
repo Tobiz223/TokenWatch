@@ -7,7 +7,9 @@ local usage logs (`~/.claude/projects/**/*.jsonl`). Fully offline — no API key
 - Month-to-date spend in the menu bar
 - Request history with model, cost, tokens, and prompt preview
 - "Overkill" alerts: an expensive model used on a simple task, with estimated overpay
-- Model Advisor: paste a prompt → recommended cheapest adequate model → run via `claude -p`
+- Model Advisor: describe a task → Claude Haiku analyzes the *situation* (not just length)
+  and picks the cheapest capable model, with reasoning, confidence, and savings vs Opus →
+  run via `claude -p` (offline heuristic fallback when Claude isn't on PATH)
 
 ## Requirements
 - macOS 13+
