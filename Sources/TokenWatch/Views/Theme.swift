@@ -10,45 +10,44 @@ extension Color {
     }
 }
 
-/// The "Running Meter" palette — a dark cockpit with a warm money accent.
+/// A restrained, professional dark palette — one accent (money), quiet everything else.
 enum Theme {
-    static let ink     = Color(hex: 0x0B1220)
-    static let slate   = Color(hex: 0x131E33)
-    static let slate2  = Color(hex: 0x1B2942)
-    static let hair    = Color(hex: 0x26344F)
-    static let amber   = Color(hex: 0xF5A623)
-    static let amberDk = Color(hex: 0xC97E12)
-    static let mint    = Color(hex: 0x4ED6A9)
-    static let coral   = Color(hex: 0xFF6B5B)
-    static let text    = Color(hex: 0xEAF0FA)
-    static let muted   = Color(hex: 0x7C8AA5)
-    static let track   = Color(hex: 0x0C1428)
-    static let paper   = Color(hex: 0xECE9E1)
-    static let paperInk = Color(hex: 0x1A1D22)
+    static let bg       = Color(hex: 0x0A0F1A)
+    static let surface  = Color(hex: 0x111826)
+    static let surface2 = Color(hex: 0x161F30)
+    static let line     = Color(hex: 0x212C42)
+    static let lineSoft = Color(hex: 0x1A2334)
+    static let accent   = Color(hex: 0xE8A317)
+    static let green    = Color(hex: 0x3FB98C)   // haiku / cheap
+    static let amber    = Color(hex: 0xE8A317)   // sonnet / mid
+    static let red      = Color(hex: 0xE5564B)   // opus / overkill
+    static let text     = Color(hex: 0xE6EDF7)
+    static let muted    = Color(hex: 0x8494AC)
+    static let faint    = Color(hex: 0x5A6B85)
+    static let track    = Color(hex: 0x0E1524)
 
-    /// Bar gradient for a model family (expensive → cheap encodes cost tier).
-    static func barGradient(for short: String) -> LinearGradient {
-        let stops: [Color]
+    /// Flat family color (expensive → cheap encodes cost tier).
+    static func familyColor(_ short: String) -> Color {
         switch short {
-        case "Opus":   stops = [Color(hex: 0xA83B30), coral]
-        case "Sonnet": stops = [amberDk, amber]
-        case "Haiku":  stops = [Color(hex: 0x2F9E7A), mint]
-        default:       stops = [amberDk, amber]
+        case "Opus":   return red
+        case "Sonnet": return amber
+        case "Haiku":  return green
+        default:       return amber
         }
-        return LinearGradient(colors: stops, startPoint: .leading, endPoint: .trailing)
     }
 }
 
-func usd(_ v: Double) -> String { String(format: "$%.2f", v) }
-
-/// Uppercase mono label used as a section eyebrow.
-struct Eyebrow: View {
+/// Uppercase section label with a trailing hairline rule.
+struct SectionLabel: View {
     let text: String
     init(_ text: String) { self.text = text }
     var body: some View {
-        Text(text.uppercased())
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
-            .tracking(2.2)
-            .foregroundColor(Theme.muted)
+        HStack(spacing: 10) {
+            Text(text.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.6)
+                .foregroundColor(Theme.faint)
+            Rectangle().fill(Theme.lineSoft).frame(height: 1)
+        }
     }
 }
